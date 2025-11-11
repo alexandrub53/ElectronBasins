@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+import xml.etree.ElementTree as ET
+import networkx as nx
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import sys
+from matplotlib.patches import Patch
+import matplotlib.colors as mcolors
+
+def parse_cml(filename):
+    tree = ET.parse(filename)
+    root = tree.getroot()
+    atoms = root.findall(".//atomArray/atom")
+    
+    node_data = {}
+    coords = []
+
+    for atom in atoms:
+        atom_id = atom.get("id")
+        elem = atom.get("elementType")
+        x = float(atom.get("xFract"))
+        y = float(atom.get("yFract"))
+        z = float(atom.get("zFract"))
+        node_data[atom_id] = {
+            "element": elem,
+            "coord": np.array([x, y, z]),
+            "type": "basin" if elem == "Xn" else "atom"
+        }
+        coords.append((atom_id, np.array([x, y, z])))
+
+    return node_data, coords
+
+def build_graph(node_data, coords, cutoff=0.2):
+    G = nx.Graph()
+
+    for atom_id, data in node_data.items():
+        G.add_node(atom_id, **data)
+
+    for i, (id1, c1) in enumerate(coords):
+        for j, (id2, c2) in enumerate(coords):
+            if j <= i:
+                continue
+            dist = np.linalg.norm(c1 - c2)
+            if dist < cutoff:
+                G.add_edge(id1, id2, weight=dist)
+
+    return G
+
+def draw_graph(G, filename_base="graph_output"):
+    pos = {node: data["coord"][:2] for node, data in G.nodes(data=True)}
+
+    atom_nodes = [n for n, d in G.nodes(data=True) if d["type"] == "atom"]
+    basin_nodes = [n for n, d in G.nodes(data=True) if d["type"] == "basin"]
+
+    # Unique element types and color mapping
+    element_types = sorted(set(G.nodes[n]["element"] for n in atom_nodes))
+    color_map = plt.colormaps.get_cmap('tab10').resampled(len(element_types))
+    element_colors = {
+        elem: mcolors.to_hex(color_map(i)) for i, elem in enumerate(element_types)
+    }
+    atom_colors = [element_colors[G.nodes[n]["element"]] for n in atom_nodes]
+
+    plt.figure(figsize=(10, 8))
+
+    # Draw edges (bottom layer)
+    edge_collection = nx.draw_networkx_edges(G, pos, width=0.5, alpha=0.6)
+    if edge_collection:
+        edge_collection.set_zorder(1)
+
+    # Draw electron basins (middle layer)
+    basin_collection = nx.draw_networkx_nodes(
+        G, pos, nodelist=basin_nodes, node_color='#8FBC8F', node_size=200
+    )
+    if basin_collection:
+        basin_collection.set_zorder(2)
+
+    # Draw small black dots at basin centers as tiny nodes on the SAME plane (just on top of basin nodes)
+    black_dot_collection = nx.draw_networkx_nodes(
+        G, pos, nodelist=basin_nodes, node_color='black', node_size=30
+    )
+    if black_dot_collection:
+        black_dot_collection.set_zorder(3)
+
+    # Draw atoms (top of basins)
+    atom_collection = nx.draw_networkx_nodes(
+        G, pos, nodelist=atom_nodes, node_color=atom_colors, node_size=300
+    )
+    if atom_collection:
+        atom_collection.set_zorder(4)
+
+    # Label atoms
+    labels = {n: n for n in atom_nodes}
+    text_items = nx.draw_networkx_labels(G, pos, labels=labels, font_size=6)
+    for text in text_items.values():
+        text.set_zorder(5)
+
+    # Build legend
+    legend_elements = [
+        Patch(facecolor=color, edgecolor='black', label=elem)
+        for elem, color in element_colors.items()
+    ]
+    legend_elements.append(Patch(facecolor='#8FBC8F', edgecolor='black', label='Electron Basin'))
+
+    plt.legend(
+        handles=legend_elements,
+        loc='center left',
+        bbox_to_anchor=(1.0, 0.5),
+        title="Elements",
+        markerscale=0.5
+    )
+
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
+    plt.axis("equal")
+
+    output_filename = f"{filename_base}_graph.png"
+    plt.savefig(output_filename, dpi=300)
+    print(f"Plot saved as: {output_filename}")
+    plt.show()
+
+    return G
+
+
+# -----------------------------------
+# MAIN SCRIPT
+# -----------------------------------
+
+if __name__ == "__main__":
+    # Get input filename from command-line or use fallback
+    if len(sys.argv) == 2:
+        cml_file = sys.argv[1]
+    else:
+        cml_file = "test.cml"
+        print(f"No input file provided. Using default: {cml_file}")
+
+    # Ensure file exists
+    if not os.path.exists(cml_file):
+        print(f"Error: File not found: {cml_file}")
+        sys.exit(1)
+
+    print(f"Parsing file: {cml_file}")
+    node_data, coords = parse_cml(cml_file)
+
+    print("Building graph...")
+    G = build_graph(node_data, coords, cutoff=0.2)
+    print(f"Graph built with {len(G.nodes)} nodes and {len(G.edges)} edges.")
+
+    # Use input filename (without extension) for PNG name
+    filename_base = os.path.splitext(os.path.basename(cml_file))[0]
+    draw_graph(G, filename_base)
+    
