@@ -1,3 +1,5 @@
+If you use this tool before the paper is out, please cite Madison OJ Genslinger and Alexandru B. Georgescu (in preparation). But preferably talk to us first.
+
 # ElectronBasins
 Script written by Madison Genslinger to turn electron basin representations from critic2 to standard .cif files with working examples. Additional scripts for full automation QE->cif will be provided soon.
 You can get these to work by writing 'python vestaplot.py critic.out' in the command line.
